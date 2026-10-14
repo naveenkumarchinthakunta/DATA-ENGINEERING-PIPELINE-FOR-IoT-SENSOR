@@ -1,0 +1,71 @@
+# Docker Compose: Production Architecture Upgrade Path
+# Demonstrates deployment of PostgreSQL with TimescaleDB time-series extensions,
+# Eclipse Mosquitto MQTT Broker for physical IoT gateways, and containerized backend services.
+
+version: '3.8'
+
+services:
+  # 1. Production Time-Series Database
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_timescaledb
+    environment:
+      POSTGRES_DB: iot_pipeline
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: production_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iot_pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 2. MQTT Message Broker for Real Industrial Telemetry
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iot_mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    restart: unless-stopped
+
+  # 3. Flask REST API Serving Layer
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot_api
+    command: gunicorn --bind 0.0.0.0:5000 app:app --workers 4
+    environment:
+      DATABASE_URL: postgresql://postgres:production_password@timescaledb:5432/iot_pipeline
+      API_HOST: 0.0.0.0
+      API_PORT: 5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 4. Streamlit Industrial Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot_dashboard
+    command: streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      DATABASE_URL: postgresql://postgres:production_password@timescaledb:5432/iot_pipeline
+    ports:
+      - "8501:8501"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

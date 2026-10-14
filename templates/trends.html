@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}Historical Trends{% endblock %}
+{% block page_title %}📈 Sensor Telemetry Historical Trends{% endblock %}
+
+{% block content %}
+<div class="panel" style="margin-bottom: 24px;">
+  <div class="panel-body" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <label for="sensorSelect" style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Select Sensor:</label>
+      <select id="sensorSelect" class="input-control" style="width: 180px;" onchange="loadSensorTrends()">
+        <!-- Populated dynamically via JS -->
+      </select>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <label for="limitSelect" style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Readings Window:</label>
+      <select id="limitSelect" class="input-control" style="width: 140px;" onchange="loadSensorTrends()">
+        <option value="50">Last 50 Events</option>
+        <option value="100" selected>Last 100 Events</option>
+        <option value="200">Last 200 Events</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Sensor Metadata Strip -->
+<div class="kpi-grid" style="margin-bottom: 24px;">
+  <div class="kpi-card">
+    <span class="kpi-title">Assigned Machine</span>
+    <div class="kpi-value" id="trendMachine">--</div>
+    <div class="kpi-subtext" id="trendZone">Zone: --</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Operating Limits (Temp)</span>
+    <div class="kpi-value" id="trendTempLimits">--</div>
+    <div class="kpi-subtext">Min / Max Range (°C)</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Operating Limits (Press)</span>
+    <div class="kpi-value" id="trendPressLimits">--</div>
+    <div class="kpi-subtext">Min / Max Range (bar)</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Operating Limits (Vib)</span>
+    <div class="kpi-value" id="trendVibLimits">--</div>
+    <div class="kpi-subtext">Max Amplitude (mm/s)</div>
+  </div>
+</div>
+
+<!-- Plotly Trend Charts -->
+<div style="display: flex; flex-direction: column; gap: 24px;">
+  <!-- Temperature Chart -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Temperature Telemetry & Operating Limit Envelopes</div>
+    </div>
+    <div class="panel-body">
+      <div id="chartTempTrend" style="height: 320px;"></div>
+    </div>
+  </div>
+
+  <!-- Pressure and Vibration Grid -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 24px;">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Pressure Telemetry (bar)</div>
+      </div>
+      <div class="panel-body">
+        <div id="chartPressTrend" style="height: 280px;"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Vibration Amplitude (mm/s)</div>
+      </div>
+      <div class="panel-body">
+        <div id="chartVibTrend" style="height: 280px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  let sensorMetadataMap = {};
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Check if query param specifies sensor
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetSensor = urlParams.get('sensor') || 'S001';
+
+    await populateSensorDropdown(targetSensor);
+    loadSensorTrends();
+  });
+
+  function onAutoRefresh() {
+    loadSensorTrends();
+  }
+
+  async function populateSensorDropdown(selectedId) {
+    try {
+      const res = await fetch('/api/sensors');
+      const data = await res.json();
+      if (data.status === 'success') {
+        const select = document.getElementById('sensorSelect');
+        select.innerHTML = '';
+        data.data.sensors.forEach(s => {
+          sensorMetadataMap[s.sensor_id] = s;
+          const opt = document.createElement('option');
+          opt.value = s.sensor_id;
+          opt.textContent = `${s.sensor_id} (${s.machine_id} - ${s.factory_zone})`;
+          if (s.sensor_id === selectedId) opt.selected = true;
+          select.appendChild(opt);
+        });
+      }
+    } catch (e) {
+      console.error('Failed fetching sensors list:', e);
+    }
+  }
+
+  async function loadSensorTrends() {
+    const sensorId = document.getElementById('sensorSelect').value || 'S001';
+    const limit = document.getElementById('limitSelect').value || '100';
+
+    const meta = sensorMetadataMap[sensorId];
+    if (meta) {
+      document.getElementById('trendMachine').textContent = meta.machine_id;
+      document.getElementById('trendZone').textContent = `Zone: ${meta.factory_zone}`;
+      document.getElementById('trendTempLimits').textContent = `${meta.temperature_limit_min} - ${meta.temperature_limit_max}`;
+      document.getElementById('trendPressLimits').textContent = `${meta.pressure_limit_min} - ${meta.pressure_limit_max}`;
+      document.getElementById('trendVibLimits').textContent = `Max ${meta.vibration_limit_max}`;
+    }
+
+    try {
+      const res = await fetch(`/api/sensors/${sensorId}/readings?per_page=${limit}`);
+      const data = await res.json();
+      if (data.status === 'success') {
+        renderSensorTrendsPlots(sensorId, data.data.readings, meta);
+      }
+    } catch (e) {
+      console.error('Failed fetching sensor readings:', e);
+    }
+  }
+</script>
+{% endblock %}

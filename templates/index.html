@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Factory Overview{% endblock %}
+{% block page_title %}🏭 Factory Overview & System Health{% endblock %}
+
+{% block content %}
+<!-- Top Level KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Registered Sensors</span>
+      <span class="kpi-icon">📡</span>
+    </div>
+    <div class="kpi-value" id="kpiTotalSensors">--</div>
+    <div class="kpi-subtext" id="kpiSensorsSub">200 Installed Fleet</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Active Reporting</span>
+      <span class="kpi-icon">⚡</span>
+    </div>
+    <div class="kpi-value" id="kpiActiveSensors" style="color: var(--color-success);">--</div>
+    <div class="kpi-subtext" id="kpiInactiveSensors">-- Inactive / Stale</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Data Quality Yield</span>
+      <span class="kpi-icon">🛡️</span>
+    </div>
+    <div class="kpi-value" id="kpiQualityRate">--%</div>
+    <div class="kpi-subtext" id="kpiRejectedRecords">-- Quarantined</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Processed Telemetry</span>
+      <span class="kpi-icon">📊</span>
+    </div>
+    <div class="kpi-value" id="kpiProcessedRecords">--</div>
+    <div class="kpi-subtext" id="kpiRawRecords">Total Raw Events</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Active Health Alerts</span>
+      <span class="kpi-icon">🚨</span>
+    </div>
+    <div class="kpi-value" id="kpiActiveAlerts" style="color: var(--color-danger);">--</div>
+    <div class="kpi-subtext" id="kpiTotalAlerts">-- Cumulative</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-header">
+      <span class="kpi-title">Pipeline Health</span>
+      <span class="kpi-icon">⚙️</span>
+    </div>
+    <div class="kpi-value" id="kpiPipelineSuccess">--%</div>
+    <div class="kpi-subtext" id="kpiPipelineRuns">-- Executed Cycles</div>
+  </div>
+</div>
+
+<!-- Process Telemetry & Chart Row -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 24px;">
+  <!-- Left Panel: Global Averages & Zone Breakdown -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Global Fleet Telemetry Averages</div>
+    </div>
+    <div class="panel-body">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+        <div style="background-color: var(--bg-primary); padding: 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--border-color); text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Temperature</div>
+          <div id="avgTemp" style="font-size: 18px; font-weight: 700; color: #f97316; font-family: var(--font-mono);">-- °C</div>
+        </div>
+        <div style="background-color: var(--bg-primary); padding: 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--border-color); text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Pressure</div>
+          <div id="avgPress" style="font-size: 18px; font-weight: 700; color: #10b981; font-family: var(--font-mono);">-- bar</div>
+        </div>
+        <div style="background-color: var(--bg-primary); padding: 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--border-color); text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Vibration</div>
+          <div id="avgVib" style="font-size: 18px; font-weight: 700; color: #8b5cf6; font-family: var(--font-mono);">-- mm/s</div>
+        </div>
+      </div>
+      <div id="chartZones" style="height: 280px;"></div>
+    </div>
+  </div>
+
+  <!-- Right Panel: Alerts Severity Breakdown -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Operational Anomaly Severity Distribution</div>
+    </div>
+    <div class="panel-body">
+      <div id="chartSeverity" style="height: 350px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Live Telemetry Matrix Preview -->
+<div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Latest Processed Telemetry Readings</div>
+    <a href="/sensors" class="btn btn-outline btn-sm">View All 200 Sensors →</a>
+  </div>
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Event ID</th>
+          <th>Sensor</th>
+          <th>Machine</th>
+          <th>Temperature (°C)</th>
+          <th>Pressure (bar)</th>
+          <th>Vibration (mm/s)</th>
+          <th>Event Time (UTC)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="overviewTelemetryBody">
+        <tr><td colspan="8" class="empty-state"><div class="loading-spinner"></div> Loading telemetry...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    loadOverviewData();
+  });
+
+  function onAutoRefresh() {
+    loadOverviewData();
+  }
+
+  async function loadOverviewData() {
+    try {
+      const summaryRes = await fetch('/api/analytics/summary');
+      const summaryData = await summaryRes.json();
+      if (summaryData.status === 'success') {
+        renderOverviewKPIs(summaryData.data);
+      }
+
+      const sensorsRes = await fetch('/api/sensors');
+      const sensorsData = await sensorsRes.json();
+      if (sensorsData.status === 'success') {
+        renderZoneChart(sensorsData.data.sensors);
+      }
+
+      const alertsRes = await fetch('/api/alerts?per_page=100');
+      const alertsData = await alertsRes.json();
+      if (alertsData.status === 'success') {
+        renderAlertsSeverityChart(alertsData.data.severity_breakdown);
+      }
+
+      const recentRes = await fetch('/api/sensors/S001/readings?per_page=5');
+      const recentData = await recentRes.json();
+      if (recentData.status === 'success') {
+        renderOverviewTable(recentData.data.readings);
+      }
+    } catch (err) {
+      console.error('Failed loading overview data:', err);
+    }
+  }
+
+  function renderOverviewKPIs(kpis) {
+    document.getElementById('kpiTotalSensors').textContent = kpis.total_registered_sensors;
+    document.getElementById('kpiActiveSensors').textContent = kpis.active_sensors;
+    document.getElementById('kpiInactiveSensors').textContent = `${kpis.inactive_sensors} Inactive / Stale`;
+    document.getElementById('kpiQualityRate').textContent = `${kpis.validation_success_rate}%`;
+    document.getElementById('kpiRejectedRecords').textContent = `${kpis.total_rejected_records} Quarantined`;
+    document.getElementById('kpiProcessedRecords').textContent = Number(kpis.total_processed_records).toLocaleString();
+    document.getElementById('kpiRawRecords').textContent = `${Number(kpis.total_raw_records).toLocaleString()} Raw Events`;
+    document.getElementById('kpiActiveAlerts').textContent = kpis.active_alerts;
+    document.getElementById('kpiTotalAlerts').textContent = `${kpis.total_alerts} Total Alerts`;
+    document.getElementById('kpiPipelineSuccess').textContent = `${kpis.pipeline_success_rate}%`;
+    document.getElementById('kpiPipelineRuns').textContent = `${kpis.pipeline_runs_count} Cycles Run`;
+
+    document.getElementById('avgTemp').textContent = `${kpis.temperature_stats.avg} °C`;
+    document.getElementById('avgPress').textContent = `${kpis.pressure_stats.avg} bar`;
+    document.getElementById('avgVib').textContent = `${kpis.vibration_stats.avg} mm/s`;
+  }
+
+  function renderOverviewTable(readings) {
+    const tbody = document.getElementById('overviewTelemetryBody');
+    if (!readings || readings.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No processed readings yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = readings.map(r => `
+      <tr>
+        <td style="font-family: var(--font-mono); color: var(--text-muted);">${r.event_id}</td>
+        <td><strong>${r.sensor_id}</strong></td>
+        <td>${r.machine_id}</td>
+        <td style="font-family: var(--font-mono); color: #f97316;">${r.temperature_celsius !== null ? r.temperature_celsius.toFixed(2) : 'N/A'}</td>
+        <td style="font-family: var(--font-mono); color: #10b981;">${r.pressure_bar !== null ? r.pressure_bar.toFixed(2) : 'N/A'}</td>
+        <td style="font-family: var(--font-mono); color: #8b5cf6;">${r.vibration_mm_s !== null ? r.vibration_mm_s.toFixed(2) : 'N/A'}</td>
+        <td style="font-family: var(--font-mono);">${r.event_timestamp ? r.event_timestamp.replace('T', ' ').substring(0, 19) : 'N/A'}</td>
+        <td><span class="badge badge-success">VALID</span></td>
+      </tr>
+    `).join('');
+  }
+</script>
+{% endblock %}

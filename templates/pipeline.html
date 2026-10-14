@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline Operations{% endblock %}
+{% block page_title %}⚙️ Data Pipeline Orchestration & Run History{% endblock %}
+
+{% block content %}
+<!-- Execution Control Action Box -->
+<div class="panel" style="margin-bottom: 24px;">
+  <div class="panel-header">
+    <div class="panel-title">Manual Cycle Trigger</div>
+  </div>
+  <div class="panel-body" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+    <div>
+      <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Trigger Immediate Pipeline Cycle</div>
+      <div style="font-size: 12px; color: var(--text-muted);">Executes: Telemetry Acquisition → Raw Ingestion → Quality Gate Validation → Transformation → Persistence → Anomaly Detection</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <label for="batchSizeInput" style="font-size: 13px; color: var(--text-secondary);">Batch Size:</label>
+      <input type="number" id="batchSizeInput" class="input-control" value="200" min="10" max="1000" style="width: 100px;">
+      <button class="btn btn-primary" id="btnManualTrigger" onclick="executeManualPipeline()">
+        ▶ Execute Cycle
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <span class="kpi-title">Total Execution Cycles</span>
+    <div class="kpi-value" id="opsTotalRuns">--</div>
+    <div class="kpi-subtext" id="opsSuccessRuns">-- Completed</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Cycle Success Rate</span>
+    <div class="kpi-value" id="opsSuccessRate" style="color: var(--color-success);">--%</div>
+    <div class="kpi-subtext">Zero unhandled crashes</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Total Records Ingested</span>
+    <div class="kpi-value" id="opsTotalIngested">--</div>
+    <div class="kpi-subtext">Immutable Raw Storage</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Quarantined Defect Total</span>
+    <div class="kpi-value" id="opsTotalQuarantined" style="color: var(--color-danger);">--</div>
+    <div class="kpi-subtext">Isolated in Quarantine</div>
+  </div>
+</div>
+
+<!-- Stage Latency Breakdown Panel -->
+<div class="panel" style="margin-top: 24px;">
+  <div class="panel-header">
+    <div class="panel-title">Stage Latency Breakdown (Latest Cycle)</div>
+    <span style="font-size: 12px; color: var(--text-muted);" id="latestRunIdLabel">Run ID: --</span>
+  </div>
+  <div class="panel-body">
+    <div id="chartStageLatencies" style="height: 280px;"></div>
+  </div>
+</div>
+
+<!-- Audit Log Table -->
+<div class="panel" style="margin-top: 24px;">
+  <div class="panel-header">
+    <div class="panel-title">Execution Audit History (<code>pipeline_runs</code>)</div>
+    <span style="font-size: 12px; color: var(--text-muted);">Historical cycle records</span>
+  </div>
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Run ID</th>
+          <th>Start Time (UTC)</th>
+          <th>Duration</th>
+          <th>Received</th>
+          <th>Processed</th>
+          <th>Quarantined</th>
+          <th>Errors</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="pipelineRunsTableBody">
+        <tr><td colspan="8" class="empty-state"><div class="loading-spinner"></div> Loading execution logs...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    loadPipelineOpsData();
+  });
+
+  function onAutoRefresh() {
+    loadPipelineOpsData();
+  }
+
+  async function loadPipelineOpsData() {
+    try {
+      const res = await fetch('/api/pipeline/runs?limit=25');
+      const data = await res.json();
+      if (data.status === 'success') {
+        const runs = data.data.runs;
+        renderPipelineKPIs(runs);
+        renderPipelineRunsTable(runs);
+        if (runs.length > 0) {
+          renderLatestStageTimings(runs[0]);
+        }
+      }
+    } catch (e) {
+      console.error('Failed loading pipeline runs:', e);
+    }
+  }
+
+  function renderPipelineKPIs(runs) {
+    const total = runs.length;
+    const completed = runs.filter(r => r.execution_status === 'COMPLETED').length;
+    const successRate = total > 0 ? ((completed / total) * 100).toFixed(1) : '100.0';
+
+    let totalProc = 0;
+    let totalRej = 0;
+    runs.forEach(r => {
+      totalProc += (r.records_processed || 0);
+      totalRej += (r.records_rejected || 0);
+    });
+
+    document.getElementById('opsTotalRuns').textContent = total;
+    document.getElementById('opsSuccessRuns').textContent = `${completed} Completed Cycles`;
+    document.getElementById('opsSuccessRate').textContent = `${successRate}%`;
+    document.getElementById('opsTotalIngested').textContent = Number(totalProc + totalRej).toLocaleString();
+    document.getElementById('opsTotalQuarantined').textContent = Number(totalRej).toLocaleString();
+  }
+
+  function renderPipelineRunsTable(runs) {
+    const tbody = document.getElementById('pipelineRunsTableBody');
+    if (!runs || runs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No pipeline runs logged yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = runs.map(r => {
+      let durationStr = '--';
+      if (r.start_timestamp && r.end_timestamp) {
+        const start = new Date(r.start_timestamp);
+        const end = new Date(r.end_timestamp);
+        const ms = end - start;
+        durationStr = `${(ms / 1000).toFixed(3)}s`;
+      }
+
+      const statusBadge = r.execution_status === 'COMPLETED' ? 'badge-success' : 'badge-danger';
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-size: 12px; font-weight: 700;">${r.run_id}</td>
+          <td style="font-family: var(--font-mono);">${r.start_timestamp ? r.start_timestamp.replace('T', ' ').substring(0, 19) : 'N/A'}</td>
+          <td style="font-family: var(--font-mono);">${durationStr}</td>
+          <td>${r.records_received}</td>
+          <td style="color: var(--color-success); font-weight: 600;">${r.records_processed}</td>
+          <td style="color: var(--color-danger); font-weight: 600;">${r.records_rejected}</td>
+          <td>${r.error_count}</td>
+          <td><span class="badge ${statusBadge}">${r.execution_status}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderLatestStageTimings(latestRun) {
+    document.getElementById('latestRunIdLabel').textContent = `Run ID: ${latestRun.run_id}`;
+    if (!latestRun.execution_summary) return;
+
+    try {
+      const summary = typeof latestRun.execution_summary === 'string'
+        ? JSON.parse(latestRun.execution_summary)
+        : latestRun.execution_summary;
+
+      const timings = summary.stage_timings || {};
+      renderStageTimingsChart(timings);
+    } catch (e) {
+      console.error('Failed parsing execution summary:', e);
+    }
+  }
+
+  async function executeManualPipeline() {
+    const btn = document.getElementById('btnManualTrigger');
+    const batchSize = parseInt(document.getElementById('batchSizeInput').value) || 200;
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Running...';
+
+    try {
+      const res = await fetch('/api/pipeline/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch_size: batchSize })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        showToast(`Cycle ${data.data.run_id} finished in ${data.data.duration_seconds}s!`, 'success');
+        loadPipelineOpsData();
+      } else {
+        showToast(`Pipeline execution failed: ${data.message}`, 'error');
+      }
+    } catch (e) {
+      showToast(`Network error: ${e}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ Execute Cycle';
+    }
+  }
+</script>
+{% endblock %}

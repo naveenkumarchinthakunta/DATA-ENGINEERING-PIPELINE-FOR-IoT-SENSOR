@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Sensor Monitoring{% endblock %}
+{% block page_title %}📡 Real-Time Sensor Telemetry Matrix{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Fleet Sensors (200 IoT Units)</div>
+    <div style="font-size: 13px; color: var(--text-muted);" id="sensorCounter">Showing 200 sensors</div>
+  </div>
+  <div class="panel-body">
+    <!-- Filter Toolbar -->
+    <div class="filter-bar">
+      <div>
+        <input type="text" id="sensorSearchInput" class="input-control" placeholder="Search Sensor or Machine..." style="width: 260px;" oninput="applyFilters()">
+      </div>
+      <div>
+        <select id="filterZone" class="input-control" onchange="applyFilters()">
+          <option value="All">All Factory Zones</option>
+          <option value="Zone-North">Zone-North</option>
+          <option value="Zone-East">Zone-East</option>
+          <option value="Zone-South">Zone-South</option>
+          <option value="Zone-West">Zone-West</option>
+        </select>
+      </div>
+      <div>
+        <select id="filterStatus" class="input-control" onchange="applyFilters()">
+          <option value="All">All Statuses</option>
+          <option value="ACTIVE">ACTIVE</option>
+          <option value="INACTIVE">INACTIVE</option>
+          <option value="MAINTENANCE">MAINTENANCE</option>
+        </select>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="resetFilters()">Reset Filters</button>
+    </div>
+
+    <!-- Sensors Table -->
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Sensor ID</th>
+            <th>Machine</th>
+            <th>Zone</th>
+            <th>Status</th>
+            <th>Temp Limits (°C)</th>
+            <th>Pressure Limits (bar)</th>
+            <th>Vibration Limits (mm/s)</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="sensorsTableBody">
+          <tr><td colspan="8" class="empty-state"><div class="loading-spinner"></div> Loading 200 sensors...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination Controls -->
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 18px;">
+      <span style="font-size: 13px; color: var(--text-muted);" id="pageInfo">Page 1 of 1</span>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-outline btn-sm" id="btnPrevPage" onclick="prevPage()">← Previous</button>
+        <button class="btn btn-outline btn-sm" id="btnNextPage" onclick="nextPage()">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/sensors.js') }}"></script>
+{% endblock %}

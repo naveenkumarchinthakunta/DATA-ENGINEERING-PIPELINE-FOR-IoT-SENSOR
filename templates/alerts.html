@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Machine Health Alerts{% endblock %}
+{% block page_title %}🚨 Machine Health & Operational Alarms{% endblock %}
+
+{% block content %}
+<!-- KPI Strips -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <span class="kpi-title">Total Operational Alarms</span>
+    <div class="kpi-value" id="kpiTotalAlertsCount">--</div>
+    <div class="kpi-subtext">Cumulative threshold breaches</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Critical Severity</span>
+    <div class="kpi-value" id="kpiCriticalCount" style="color: var(--color-danger);">--</div>
+    <div class="kpi-subtext">Immediate shutdown / hazard</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Warning Severity</span>
+    <div class="kpi-value" id="kpiWarningCount" style="color: var(--color-warning);">--</div>
+    <div class="kpi-subtext">Threshold warning deviation</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Active (Unacknowledged)</span>
+    <div class="kpi-value" id="kpiActiveAlertsCount" style="color: #f97316;">--</div>
+    <div class="kpi-subtext">Awaiting operator verification</div>
+  </div>
+</div>
+
+<!-- Alerts Table Panel -->
+<div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Active Alarms Log</div>
+    <span style="font-size: 13px; color: var(--text-muted);" id="alertTableCounter">Showing alerts</span>
+  </div>
+  <div class="panel-body">
+    <!-- Filters -->
+    <div class="filter-bar">
+      <div>
+        <select id="filterSeverity" class="input-control" onchange="loadAlerts()">
+          <option value="">All Severities</option>
+          <option value="CRITICAL">CRITICAL</option>
+          <option value="WARNING">WARNING</option>
+        </select>
+      </div>
+      <div>
+        <select id="filterAlertStatus" class="input-control" onchange="loadAlerts()">
+          <option value="">All Statuses</option>
+          <option value="ACTIVE" selected>ACTIVE Only</option>
+          <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
+        </select>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="resetAlertFilters()">Reset Filters</button>
+    </div>
+
+    <!-- Alerts Table -->
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Alert ID</th>
+            <th>Severity</th>
+            <th>Anomaly Type</th>
+            <th>Machine</th>
+            <th>Sensor</th>
+            <th>Measured Value</th>
+            <th>Threshold Limit</th>
+            <th>Timestamp (UTC)</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="alertsTableBody">
+          <tr><td colspan="10" class="empty-state"><div class="loading-spinner"></div> Loading alerts...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    loadAlerts();
+  });
+
+  function onAutoRefresh() {
+    loadAlerts();
+  }
+
+  function resetAlertFilters() {
+    document.getElementById('filterSeverity').value = '';
+    document.getElementById('filterAlertStatus').value = '';
+    loadAlerts();
+  }
+
+  async function loadAlerts() {
+    const sev = document.getElementById('filterSeverity').value;
+    const stat = document.getElementById('filterAlertStatus').value;
+
+    let url = '/api/alerts?per_page=50';
+    if (sev) url += `&severity=${encodeURIComponent(sev)}`;
+    if (stat) url += `&status=${encodeURIComponent(stat)}`;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status === 'success') {
+        renderAlertKPIs(data.data);
+        renderAlertsTable(data.data.alerts);
+      }
+    } catch (e) {
+      console.error('Failed loading alerts:', e);
+    }
+  }
+
+  function renderAlertKPIs(data) {
+    document.getElementById('kpiTotalAlertsCount').textContent = data.total_alerts;
+    document.getElementById('kpiCriticalCount').textContent = data.severity_breakdown['CRITICAL'] || 0;
+    document.getElementById('kpiWarningCount').textContent = data.severity_breakdown['WARNING'] || 0;
+    const activeCount = data.alerts.filter(a => a.alert_status === 'ACTIVE').length;
+    document.getElementById('kpiActiveAlertsCount').textContent = activeCount;
+    document.getElementById('alertTableCounter').textContent = `Showing ${data.alerts.length} of ${data.total_alerts} alerts`;
+  }
+
+  function renderAlertsTable(alerts) {
+    const tbody = document.getElementById('alertsTableBody');
+    if (!alerts || alerts.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No alarms matching the selected filters.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = alerts.map(a => {
+      const sevBadge = a.severity === 'CRITICAL' ? 'badge-danger' : 'badge-warning';
+      const statusBadge = a.alert_status === 'ACTIVE' ? 'badge-danger' : 'badge-info';
+      const canAck = a.alert_status === 'ACTIVE';
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-size: 12px;">${a.alert_id}</td>
+          <td><span class="badge ${sevBadge}">${a.severity}</span></td>
+          <td><strong>${a.alert_type}</strong></td>
+          <td>${a.machine_id}</td>
+          <td>${a.sensor_id}</td>
+          <td style="font-family: var(--font-mono); font-weight: 700; color: #f97316;">${a.measured_value !== null ? a.measured_value.toFixed(2) : 'N/A'}</td>
+          <td style="font-family: var(--font-mono); color: var(--text-muted);">${a.configured_threshold !== null ? a.configured_threshold.toFixed(2) : 'N/A'}</td>
+          <td style="font-family: var(--font-mono);">${a.alert_timestamp ? a.alert_timestamp.replace('T', ' ').substring(0, 19) : 'N/A'}</td>
+          <td><span class="badge ${statusBadge}">${a.alert_status}</span></td>
+          <td>
+            ${canAck ? `
+              <button class="btn btn-outline btn-sm" onclick="acknowledgeAlert('${a.alert_id}')">Acknowledge</button>
+            ` : `<span style="font-size: 11px; color: var(--text-muted);">Acknowledged</span>`}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function acknowledgeAlert(alertId) {
+    try {
+      const res = await fetch(`/api/alerts/${alertId}/acknowledge`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        showToast(`Alert ${alertId} acknowledged.`, 'success');
+        loadAlerts();
+      }
+    } catch (e) {
+      showToast(`Failed acknowledging alert: ${e}`, 'error');
+    }
+  }
+</script>
+{% endblock %}

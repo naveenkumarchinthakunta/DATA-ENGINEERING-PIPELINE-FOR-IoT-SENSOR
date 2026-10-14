@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}Data Quality & Quarantine{% endblock %}
+{% block page_title %}🛡️ Data Quality Gate & Quarantine Storage{% endblock %}
+
+{% block content %}
+<!-- Top KPI Summary -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <span class="kpi-title">Validation Pass Rate</span>
+    <div class="kpi-value" id="dqPassRate" style="color: var(--color-success);">--%</div>
+    <div class="kpi-subtext">Clean Conforming Telemetry</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Quarantined Records</span>
+    <div class="kpi-value" id="dqTotalRejected" style="color: var(--color-danger);">--</div>
+    <div class="kpi-subtext">Segregated Defect Payloads</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Valid Records Passed</span>
+    <div class="kpi-value" id="dqTotalValid">--</div>
+    <div class="kpi-subtext">Transformed & Persisted</div>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-title">Data Quality Policies</span>
+    <div class="kpi-value" style="color: var(--color-info);">6 Rules</div>
+    <div class="kpi-subtext">Schema & Physical Sanity Checks</div>
+  </div>
+</div>
+
+<!-- Rejection Reason Breakdown & Rules Summary -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 24px;">
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Quarantined Defect Breakdown by Category</div>
+    </div>
+    <div class="panel-body">
+      <div id="chartRejections" style="height: 320px;"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Active Data Quality Policies</div>
+    </div>
+    <div class="panel-body">
+      <div style="display: flex; flex-direction: column; gap: 12px; font-size: 13px;">
+        <div style="padding: 10px; background-color: var(--bg-primary); border-radius: var(--border-radius-sm); border-left: 3px solid var(--color-brand);">
+          <strong>1. Structural Schema Validation:</strong> Requires valid <code>event_id</code>, <code>sensor_id</code>, <code>machine_id</code>, and ISO timestamp.
+        </div>
+        <div style="padding: 10px; background-color: var(--bg-primary); border-radius: var(--border-radius-sm); border-left: 3px solid var(--color-brand);">
+          <strong>2. Clock Skew & Future Timestamp:</strong> Rejects timestamps exceeding &gt; 120s clock skew into the future.
+        </div>
+        <div style="padding: 10px; background-color: var(--bg-primary); border-radius: var(--border-radius-sm); border-left: 3px solid var(--color-brand);">
+          <strong>3. Numerical Integrity:</strong> Disallows <code>NaN</code>, <code>Inf</code>, or non-numeric string values.
+        </div>
+        <div style="padding: 10px; background-color: var(--bg-primary); border-radius: var(--border-radius-sm); border-left: 3px solid var(--color-brand);">
+          <strong>4. Physical Sanity:</strong> Pressure cannot be negative; temperature cannot be below absolute zero (&minus;273.15 °C).
+        </div>
+        <div style="padding: 10px; background-color: var(--bg-primary); border-radius: var(--border-radius-sm); border-left: 3px solid var(--color-brand);">
+          <strong>5. Intra-Batch Deduplication:</strong> Identifies and quaranteens duplicate <code>event_id</code> transmissions.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quarantine Table Log -->
+<div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Quarantine Storage Table (<code>rejected_sensor_data</code>)</div>
+    <span style="font-size: 12px; color: var(--text-muted);">Immutable defect audit log</span>
+  </div>
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Rejection ID</th>
+          <th>Sensor ID</th>
+          <th>Quarantined At (UTC)</th>
+          <th>Failure Reason</th>
+          <th>Raw Payload Snippet</th>
+        </tr>
+      </thead>
+      <tbody id="quarantineTableBody">
+        <tr><td colspan="5" class="empty-state"><div class="loading-spinner"></div> Loading quarantine table...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    loadDataQualityData();
+  });
+
+  function onAutoRefresh() {
+    loadDataQualityData();
+  }
+
+  async function loadDataQualityData() {
+    try {
+      const res = await fetch('/api/data-quality/summary');
+      const data = await res.json();
+      if (data.status === 'success') {
+        const dq = data.data;
+        document.getElementById('dqPassRate').textContent = `${dq.pass_rate_percentage}%`;
+        document.getElementById('dqTotalRejected').textContent = Number(dq.total_rejected_records).toLocaleString();
+        document.getElementById('dqTotalValid').textContent = Number(dq.total_valid_records).toLocaleString();
+
+        renderRejectionChart(dq.reasons_breakdown);
+        renderQuarantineTable(dq.recent_rejections);
+      }
+    } catch (e) {
+      console.error('Failed fetching data quality summary:', e);
+    }
+  }
+
+  function renderQuarantineTable(rejections) {
+    const tbody = document.getElementById('quarantineTableBody');
+    if (!rejections || rejections.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No quarantined records found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rejections.map(r => `
+      <tr>
+        <td style="font-family: var(--font-mono); font-weight: 700;">#${r.rejection_id}</td>
+        <td><strong>${r.sensor_id || 'N/A'}</strong></td>
+        <td style="font-family: var(--font-mono);">${r.rejection_timestamp ? r.rejection_timestamp.replace('T', ' ').substring(0, 19) : 'N/A'}</td>
+        <td><span class="badge badge-danger">${r.rejection_reason}</span></td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          ${typeof r.raw_payload === 'string' ? r.raw_payload : JSON.stringify(r.raw_payload)}
+        </td>
+      </tr>
+    `).join('');
+  }
+</script>
+{% endblock %}
